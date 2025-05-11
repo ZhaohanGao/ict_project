@@ -1,3 +1,4 @@
+from datetime import datetime
 import cv2
 import uuid
 import csv
@@ -6,16 +7,49 @@ from flask import Flask, request, jsonify, send_file
 from gtts import gTTS
 from detector import load_model, detect_vehicles, estimate_speed_by_length
 from license import extract_vehicle_features
+import random
 
 app = Flask(__name__)
 model = load_model()
 
 SPEED_LIMIT = 60.0  # km/h
 
+
+def generate_bd_license_plate():
+    city = "DHAKA"
+    vehicle_type = "GA"
+    year = str(random.randint(20, 24))
+    number = str(random.randint(1, 9999)).zfill(4)
+    return f"{city} {vehicle_type} {year}-{number}"
+
 @app.route("/detect", methods=["POST"])
 def violation_detect():
+    camera_id = request.form.get("camera_id")
+    if not camera_id:
+        return jsonify({"error": "Missing camera_id"}), 400
     if 'video' not in request.files:
         return jsonify({"error": "No video file provided"}), 400
+
+
+    # Query camera data from cameras.csv
+    camera_info = {}
+    camera_file_path = os.path.join("speed_monitor_dashboard", "data", "cameras.csv")
+
+    if os.path.isfile(camera_file_path):
+        with open(camera_file_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row["camera_id"] == camera_id:
+                    camera_info = row
+                    break
+    else:
+        return jsonify({"error": "cameras.csv not found"}), 500
+
+    # 提取信息（字段名请根据你实际文件来修改）
+    latitude = camera_info.get("latitude", "")
+    longitude = camera_info.get("longitude", "")
+    speed_limit = float(camera_info.get("speed_limit", SPEED_LIMIT))  # fallback to default
+
 
     video_file = request.files['video']
     video_path = os.path.join("uploads", video_file.filename)
@@ -99,10 +133,49 @@ def violation_detect():
             writer.writerow(row)
             if speed > SPEED_LIMIT:
                 overspeed_vehicles.append(row)
+    
+    # Save to the database of the dashboard
+    database_path = os.path.join("speed_monitor_dashboard", "data", "incidents.csv")
+    file_exists = os.path.isfile(database_path)
+    overspeed_vehicles = []
+
+    if file_exists:
+        with open(database_path, "rb+") as f:
+            f.seek(-1, os.SEEK_END)
+            if f.read(1) != b'\n':
+                f.write(b'\n')
+
+    with open(database_path, "a", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=[
+            "timestamp", "camera_id", "license_plate", "latitude", "longitude",
+            "speed_limit", "actual_speed", "speed_difference", "image_url"
+        ])
+        if not file_exists:
+            writer.writeheader()
+
+        for car_id, info in track_data.items():
+            speed = info.get("speed", 0.0)
+            if speed > speed_limit:  # ✅ 只记录超速
+                row = {
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "camera_id": camera_id,
+                    "license_plate": generate_bd_license_plate(),
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "speed_limit": speed_limit,
+                    "actual_speed": speed,
+                    "speed_difference": speed - speed_limit,
+                    "image_url": "https://pixabay.com/get/gcbe6014c31d8395e94b28614c44309452e1a3f3dea8642c5e7e75d2befad0280cf665163db4112dc6b75479bfb27540981956833167dcd7bc2e287e13c621e6b_1280.jpg",
+                }
+                writer.writerow(row)
+                overspeed_vehicles.append(row)
+
+
+
 
     if overspeed_vehicles:
         lines = [
-            f"Vehicle {v['plate'] or v['id']} is overspeeding at {v['speed_kmh']} kilometers per hour."
+            f"Vehicle {v['license_plate']} is overspeeding at {v['actual_speed']} kilometers per hour."
             for v in overspeed_vehicles
         ]
         tts_text = " ".join(lines)

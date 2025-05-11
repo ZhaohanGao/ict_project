@@ -1,0 +1,11 @@
+camera_id,latitude,longitude,location_name,speed_limit
+CAM001,23.8103,90.4125,Dhaka Location 1,60
+CAM002,23.8203,90.4225,Dhaka Location 2,50
+CAM003,23.8003,90.4025,Dhaka Location 3,70
+CAM004,23.7903,90.3925,Dhaka Location 4,40
+CAM005,23.8303,90.4325,Dhaka Location 5,80
+CAM006,23.7803,90.3825,Dhaka Location 6,50
+CAM007,23.8403,90.4425,Dhaka Location 7,60
+CAM008,23.7703,90.3725,Dhaka Location 8,70
+CAM009,23.8503,90.4525,Dhaka Location 9,40
+CAM010,23.7603,90.3625,Dhaka Location 10,60
