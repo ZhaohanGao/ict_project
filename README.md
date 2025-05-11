@@ -26,15 +26,11 @@ Analyze a video file and return a generated MP3 with overspeeding announcements.
 curl -X POST http://localhost:5000/detect -F "video=@your_video.mp4" --output alert.mp3
 ```
 
-### `POST /analyze`
-
-Same as `/detect`, but returns JSON output with all detected vehicles.
-
 ### `GET /vehicles`
 
 Returns all recorded vehicle data from the CSV database.
 
-### `GET /overspeed`
+### `GET /violations`
 
 Returns vehicles exceeding the current speed limit.
 
