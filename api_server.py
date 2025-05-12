@@ -9,7 +9,7 @@ from detector import load_model, detect_vehicles, estimate_speed_by_length
 from license import extract_vehicle_features
 import random
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=".", static_url_path="/")
 model = load_model()
 
 SPEED_LIMIT = 60.0  # km/h
@@ -45,7 +45,6 @@ def violation_detect():
     else:
         return jsonify({"error": "cameras.csv not found"}), 500
 
-    # 提取信息（字段名请根据你实际文件来修改）
     latitude = camera_info.get("latitude", "")
     longitude = camera_info.get("longitude", "")
     speed_limit = float(camera_info.get("speed_limit", SPEED_LIMIT))  # fallback to default
@@ -57,6 +56,9 @@ def violation_detect():
     video_file.save(video_path)
 
     cap = cv2.VideoCapture(video_path)
+    output_path = os.path.join("uploads", "annotated_output.mp4")
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out_writer = cv2.VideoWriter(output_path, fourcc, cap.get(cv2.CAP_PROP_FPS) or 30, (int(cap.get(3)), int(cap.get(4))))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
 
     trackers = {}
@@ -109,10 +111,20 @@ def violation_detect():
                 track_data[car_id]["class"]
             )
 
+        for cid, info in track_data.items():
+            if "bbox" in info:
+                x, y, w, h = info["bbox"]
+                color = (0, 255, 0) if info.get("speed", 0.0) <= SPEED_LIMIT else (0, 0, 255)
+                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+                label = f"{info['features']['type']} {info.get('speed', 0.0):.1f} km/h"
+                cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        out_writer.write(frame)
+
         for car_id in delete_ids:
             trackers.pop(car_id)
 
     cap.release()
+    out_writer.release()
 
     database_path = os.path.join("uploads", "database.csv")
     file_exists = os.path.isfile(database_path)
@@ -155,7 +167,7 @@ def violation_detect():
 
         for car_id, info in track_data.items():
             speed = info.get("speed", 0.0)
-            if speed > speed_limit:  # ✅ 只记录超速
+            if speed > speed_limit:
                 row = {
                     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "camera_id": camera_id,
@@ -170,9 +182,6 @@ def violation_detect():
                 writer.writerow(row)
                 overspeed_vehicles.append(row)
 
-
-
-
     if overspeed_vehicles:
         lines = [
             f"Vehicle {v['license_plate']} is overspeeding at {v['actual_speed']} kilometers per hour."
@@ -186,7 +195,12 @@ def violation_detect():
     audio_path = os.path.join("uploads", "overspeed_alert.mp3")
     tts.save(audio_path)
 
-    return send_file(audio_path, mimetype="audio/mpeg")
+    return jsonify({
+        "audio_path": audio_path,
+        "video_path": output_path,
+        "overspeed_vehicles": overspeed_vehicles,
+        "speed_limit": SPEED_LIMIT
+    })
 
 @app.route("/vehicles", methods=["GET"])
 def get_all_vehicles():
