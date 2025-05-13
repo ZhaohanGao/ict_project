@@ -77,7 +77,6 @@ def video_upload_ui():
                 except Exception as e:
                     st.error(f"Upload failed: {e}")
 
-
 # Header
 st.title("📊 Dhaka Speeding Vehicles Monitoring Dashboard")
 st.write("Monitor and analyze speeding vehicle incidents captured by traffic cameras in Dhaka, Bangladesh.")
@@ -334,9 +333,7 @@ with st.expander("数据管理 / Data Management"):
                     st.cache_data.clear()
                 except Exception as e:
                     st.error(f"添加事件时出错 / Error adding incident: {str(e)}")
-
 # Footer
+video_upload_ui()
 st.markdown("---")
 st.markdown("© 2025 Dhaka Speeding Vehicles Monitoring System")
-st.markdown("---")
-video_upload_ui()
