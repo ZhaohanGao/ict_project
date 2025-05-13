@@ -30,11 +30,8 @@ def violation_detect():
     if 'video' not in request.files:
         return jsonify({"error": "No video file provided"}), 400
 
-
-    # Query camera data from cameras.csv
     camera_info = {}
     camera_file_path = os.path.join("speed_monitor_dashboard", "data", "cameras.csv")
-
     if os.path.isfile(camera_file_path):
         with open(camera_file_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -47,12 +44,11 @@ def violation_detect():
 
     latitude = camera_info.get("latitude", "")
     longitude = camera_info.get("longitude", "")
-    speed_limit = float(camera_info.get("speed_limit", SPEED_LIMIT))  # fallback to default
-
+    speed_limit = float(camera_info.get("speed_limit", SPEED_LIMIT))
 
     video_file = request.files['video']
-    video_path = os.path.join("uploads", video_file.filename)
     os.makedirs("uploads", exist_ok=True)
+    video_path = os.path.join("uploads", video_file.filename)
     video_file.save(video_path)
 
     cap = cv2.VideoCapture(video_path)
@@ -60,6 +56,9 @@ def violation_detect():
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out_writer = cv2.VideoWriter(output_path, fourcc, cap.get(cv2.CAP_PROP_FPS) or 30, (int(cap.get(3)), int(cap.get(4))))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
+
+    snapshot_dir = os.path.join("uploads", "snapshots")
+    os.makedirs(snapshot_dir, exist_ok=True)
 
     trackers = {}
     track_data = {}
@@ -89,7 +88,8 @@ def violation_detect():
                     "positions": [(frame_id, (x + w//2, y + h))],
                     "bboxes": [(x, y, w, h)],
                     "class": det['class_name'],
-                    "features": extract_vehicle_features(frame, det['bbox'], det['class_name'])
+                    "features": extract_vehicle_features(frame, det['bbox'], det['class_name']),
+                    "snapshot_frame": None
                 }
 
         delete_ids = []
@@ -104,6 +104,7 @@ def violation_detect():
             track_data[car_id]["positions"].append((frame_id, (cx, cy)))
             track_data[car_id]["bboxes"].append((x, y, w, h))
             track_data[car_id]["bbox"] = (x, y, w, h)
+            track_data[car_id]["snapshot_frame"] = frame.copy()
             track_data[car_id]["speed"] = estimate_speed_by_length(
                 track_data[car_id]["positions"],
                 track_data[car_id]["bboxes"],
@@ -126,38 +127,18 @@ def violation_detect():
     cap.release()
     out_writer.release()
 
-    database_path = os.path.join("uploads", "database.csv")
-    file_exists = os.path.isfile(database_path)
     overspeed_vehicles = []
-    with open(database_path, "a", newline="", encoding="utf-8") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=["id", "type", "color", "plate", "speed_kmh"])
-        if not file_exists:
-            writer.writeheader()
-        for car_id, info in track_data.items():
-            speed = info.get("speed", 0.0)
-            row = {
-                "id": car_id,
-                "type": info['features']['type'],
-                "color": info['features']['dominant_color'],
-                "plate": info['features'].get('plate'),
-                "speed_kmh": speed
-            }
-            writer.writerow(row)
-            if speed > SPEED_LIMIT:
-                overspeed_vehicles.append(row)
-    
-    # Save to the database of the dashboard
-    database_path = os.path.join("speed_monitor_dashboard", "data", "incidents.csv")
-    file_exists = os.path.isfile(database_path)
-    overspeed_vehicles = []
+    db_path = os.path.join("speed_monitor_dashboard", "data", "incidents.csv")
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    file_exists = os.path.isfile(db_path)
 
     if file_exists:
-        with open(database_path, "rb+") as f:
+        with open(db_path, "rb+") as f:
             f.seek(-1, os.SEEK_END)
             if f.read(1) != b'\n':
                 f.write(b'\n')
 
-    with open(database_path, "a", newline="", encoding="utf-8") as csvfile:
+    with open(db_path, "a", newline="", encoding="utf-8") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=[
             "timestamp", "camera_id", "license_plate", "latitude", "longitude",
             "speed_limit", "actual_speed", "speed_difference", "image_url"
@@ -168,16 +149,27 @@ def violation_detect():
         for car_id, info in track_data.items():
             speed = info.get("speed", 0.0)
             if speed > speed_limit:
+                snapshot_path = os.path.join(snapshot_dir, f"{car_id}.jpg")
+                snapshot = info.get("snapshot_frame")
+                if snapshot is not None:
+                    x, y, w, h = info.get("bbox", (0, 0, 0, 0))
+                    cv2.rectangle(snapshot, (x, y), (x + w, y + h), (0, 0, 255), 2)
+                    label = f"{speed:.1f} km/h"
+                    plate = info["features"].get("plate", car_id)
+                    cv2.putText(snapshot, f"{label}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                    cv2.putText(snapshot, f"Plate: {plate}", (x, y + h + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+                    cv2.imwrite(snapshot_path, snapshot)
+
                 row = {
                     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "camera_id": camera_id,
-                    "license_plate": generate_bd_license_plate(),
+                    "license_plate": plate,
                     "latitude": latitude,
                     "longitude": longitude,
                     "speed_limit": speed_limit,
                     "actual_speed": speed,
                     "speed_difference": speed - speed_limit,
-                    "image_url": "https://pixabay.com/get/gcbe6014c31d8395e94b28614c44309452e1a3f3dea8642c5e7e75d2befad0280cf665163db4112dc6b75479bfb27540981956833167dcd7bc2e287e13c621e6b_1280.jpg",
+                    "image_url": f"/uploads/snapshots/{car_id}.jpg"
                 }
                 writer.writerow(row)
                 overspeed_vehicles.append(row)
@@ -201,6 +193,7 @@ def violation_detect():
         "overspeed_vehicles": overspeed_vehicles,
         "speed_limit": SPEED_LIMIT
     })
+
 
 @app.route("/vehicles", methods=["GET"])
 def get_all_vehicles():
