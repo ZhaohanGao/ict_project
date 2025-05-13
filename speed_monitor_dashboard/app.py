@@ -52,6 +52,32 @@ def load_data():
 
 cameras_df, incidents_df = load_data()
 
+# Video loading
+def video_upload_ui():
+    st.header("Upload Video for Overspeed Detection")
+    st.write("Upload a video to detect speeding vehicles. The backend will analyze it and return an audio alert.")
+
+    uploaded_video = st.file_uploader("Choose a traffic video", type=["mp4", "avi", "mov"])
+    
+    if uploaded_video is not None:
+        st.video(uploaded_video)
+        
+        if st.button("Submit for Detection"):
+            with st.spinner("Analyzing... please wait..."):
+                try:
+                    response = requests.post("http://localhost:5000/detect", files={"video": uploaded_video})
+                    if response.status_code == 200:
+                        audio_path = "alert.mp3"
+                        with open(audio_path, "wb") as f:
+                            f.write(response.content)
+                        st.success("Overspeeding analyzed. Playing audio alert:")
+                        st.audio(audio_path)
+                    else:
+                        st.error(f"Server error: {response.status_code}")
+                except Exception as e:
+                    st.error(f"Upload failed: {e}")
+
+
 # Header
 st.title("📊 Dhaka Speeding Vehicles Monitoring Dashboard")
 st.write("Monitor and analyze speeding vehicle incidents captured by traffic cameras in Dhaka, Bangladesh.")
@@ -312,3 +338,5 @@ with st.expander("数据管理 / Data Management"):
 # Footer
 st.markdown("---")
 st.markdown("© 2025 Dhaka Speeding Vehicles Monitoring System")
+st.markdown("---")
+video_upload_ui()
