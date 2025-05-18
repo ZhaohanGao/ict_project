@@ -32,7 +32,8 @@ def load_model():
     return model
 
 def detect_vehicles(frame, model, threshold=0.5):
-    image_tensor = F.to_tensor(frame).unsqueeze(0)
+    device = next(model.parameters()).device  # Gets the device of the model
+    image_tensor = F.to_tensor(frame).unsqueeze(0).to(device)  
     with torch.no_grad():
         output = model(image_tensor)[0]
 

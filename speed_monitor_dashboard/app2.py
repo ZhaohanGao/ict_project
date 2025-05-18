@@ -123,7 +123,7 @@ if st.session_state.show_detection_page:
         camera_id = f"CAM{int(camera_num_str):03d}"
         st.markdown(f"➡️ Camera ID：`{camera_id}`")
     else:
-        st.warning("Please entering valid camera index number，例如：1、12、101 等")
+        st.warning("Please entering valid camera index number，Such as：1、12、101 etc.")
         camera_id = None
     video_file = st.file_uploader("Upload video file", type=["mp4", "avi", "mov"])
 
@@ -136,11 +136,11 @@ if st.session_state.show_detection_page:
             response = requests.post("http://localhost:5000/detect", files=files)
 
             if response.status_code == 200:
-                audio_path = "uploads/overspeed_alert.mp3"
+                audio_path = "../uploads/overspeed_alert.mp3"
                 with open(audio_path, "wb") as f:
                     f.write(response.content)
 
-                st.success("检测完成，正在播放提示音：")
+                st.success("Overspeeding analyzed. Playing audio alert：")
                 st.audio(audio_path, format="audio/mp3", start_time=0)
 
                 st.cache_data.clear()

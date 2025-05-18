@@ -8,6 +8,19 @@ from gtts import gTTS
 from detector import load_model, detect_vehicles, estimate_speed_by_length
 from license import extract_vehicle_features
 import random
+from torchvision.models.detection import fasterrcnn_resnet50_fpn, FasterRCNN_ResNet50_FPN_Weights
+import torch
+
+def load_model():
+    weights = FasterRCNN_ResNet50_FPN_Weights.DEFAULT
+    model = fasterrcnn_resnet50_fpn(weights=weights)
+    model.eval()
+    if torch.cuda.is_available():
+        model = model.to("cuda")
+        print("✅ Using GPU.")
+    else:
+        print("⚠️ Using CPU. GPU not available.")
+    return model
 
 app = Flask(__name__, static_folder=".", static_url_path="/")
 model = load_model()
