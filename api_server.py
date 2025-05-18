@@ -163,12 +163,13 @@ def violation_detect():
     audio_path = os.path.join("uploads", "overspeed_alert.mp3")
     tts.save(audio_path)
 
-    return jsonify({
-        "audio_path": audio_path,
-        "video_path": output_path,
-        "overspeed_vehicles": overspeed_vehicles,
-        "speed_limit": SPEED_LIMIT
-    })
+    # 返回音频文件作为流媒体（不返回 JSON）
+    return send_file(
+        audio_path,
+        mimetype="audio/mpeg",
+        as_attachment=False,
+        download_name="overspeed_alert.mp3"
+    )
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

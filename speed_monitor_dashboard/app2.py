@@ -137,17 +137,11 @@ if st.session_state.show_detection_page:
             response = requests.post("http://localhost:5000/detect", files=files)
 
             if response.status_code == 200:
-                audio_path = "../uploads/overspeed_alert.mp3"
-                with open(audio_path, "wb") as f:
-                    f.write(response.content)
-
                 st.success("Overspeeding analyzed. Playing audio alert：")
-                st.audio(audio_path, format="audio/mp3", start_time=0)
-
-                st.cache_data.clear()
-                st.rerun()
+                st.audio(response.content, format="audio/mp3")
             else:
-                st.error(f"Detecting failed：{response.text}")
+                st.error(f"Detection failed: {response.text}")
+
 
     # ⚠️ 非常重要：防止仪表盘内容继续加载
     st.stop()
