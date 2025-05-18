@@ -15,6 +15,31 @@ from PIL import Image
 import requests
 from io import BytesIO
 
+
+def load_image(source):
+    """Load image from a URL or local file depending on input format."""
+    try:
+        if source.startswith("http://") or source.startswith("https://"):
+            # Load from URL
+            response = requests.get(source)
+            if response.status_code == 200:
+                return response.content
+            else:
+                st.error(f"Failed to load image from URL: {source}, Status code: {response.status_code}")
+                return None
+        else:
+            # Load from local file
+            if os.path.isfile(source):
+                with open(source, "rb") as f:
+                    return f.read()
+            else:
+                st.error(f"File not found: {source}")
+                return None
+    except Exception as e:
+        st.error(f"Error loading image from source: {source}, Error: {str(e)}")
+        return None
+    
+    
 def load_image_from_url(url):
     """Load an image from a URL and convert to base64 for embedding."""
     try:

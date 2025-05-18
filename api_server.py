@@ -182,7 +182,7 @@ def violation_detect():
                     "speed_limit": speed_limit,
                     "actual_speed": speed,
                     "speed_difference": speed - speed_limit,
-                    "image_url": f"/uploads/snapshots/{car_id}.jpg"
+                    "image_url": f"../uploads/snapshots/{car_id}.jpg"
                 }
                 writer.writerow(row)
                 overspeed_vehicles.append(row)
