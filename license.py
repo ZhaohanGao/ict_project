@@ -2,7 +2,9 @@ import cv2
 import numpy as np
 import easyocr
 
-reader = easyocr.Reader(['en'], gpu=False)
+import torch
+reader = easyocr.Reader(['en'], gpu=torch.cuda.is_available())
+
 
 def extract_vehicle_features(frame, bbox, class_name):
     x, y, w, h = bbox

@@ -1,21 +1,6 @@
+from ultralytics import YOLO
 import torch
-import numpy as np
-from torchvision.models.detection import fasterrcnn_resnet50_fpn
-from torchvision.transforms import functional as F
-
-COCO_INSTANCE_CATEGORY_NAMES = [
-    '__background__', 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus',
-    'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter',
-    'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra',
-    'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis',
-    'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard',
-    'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon',
-    'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog',
-    'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'dining table',
-    'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave',
-    'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors',
-    'teddy bear', 'hair drier', 'toothbrush'
-]
+import cv2
 
 VEHICLE_CLASSES = {'car', 'truck', 'bus', 'motorcycle'}
 
@@ -27,29 +12,27 @@ DEFAULT_VEHICLE_LENGTHS = {
 }
 
 def load_model():
-    model = fasterrcnn_resnet50_fpn(weights="DEFAULT")
-    model.eval()
+    model = YOLO("yolov8n.pt")  # 可替换为 yolov8s.pt/yolov8m.pt 等更大模型
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
+    print(f"✅ YOLOv8 loaded on {device.upper()}")
     return model
 
 def detect_vehicles(frame, model, threshold=0.5):
-    device = next(model.parameters()).device  # Gets the device of the model
-    image_tensor = F.to_tensor(frame).unsqueeze(0).to(device)  
-    with torch.no_grad():
-        output = model(image_tensor)[0]
+    # YOLO 可以直接接受 OpenCV 图像（BGR）
+    results = model(frame)[0]
 
-    results = []
-    for box, label, score in zip(output['boxes'], output['labels'], output['scores']):
-        if score >= threshold:
-            if label.item() >= len(COCO_INSTANCE_CATEGORY_NAMES):
-                continue
-            class_name = COCO_INSTANCE_CATEGORY_NAMES[label.item()]
-            if class_name in VEHICLE_CLASSES:
-                x1, y1, x2, y2 = box.int().tolist()
-                results.append({
-                    'bbox': (x1, y1, x2 - x1, y2 - y1),
-                    'class_name': class_name
-                })
-    return results
+    detections = []
+    for box, cls_id, conf in zip(results.boxes.xyxy, results.boxes.cls, results.boxes.conf):
+        class_name = model.names[int(cls_id)]
+        if class_name in VEHICLE_CLASSES and conf >= threshold:
+            x1, y1, x2, y2 = map(int, box.tolist())
+            detections.append({
+                "bbox": (x1, y1, x2 - x1, y2 - y1),
+                "class_name": class_name,
+                "confidence": float(conf)
+            })
+    return detections
 
 def estimate_speed_by_length(position_history, bbox_history, fps, vehicle_class):
     if len(position_history) < 2:

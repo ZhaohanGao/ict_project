@@ -19,6 +19,7 @@ import requests
 
 from data_handler import load_csv_data
 from utils import (
+    load_image,
     load_image_from_url, 
     filter_data, 
     create_map, 
@@ -225,7 +226,7 @@ with col1:
         
         with image_col:
             # Display the camera image
-            image_data = load_image_from_url(incident['image_url'])
+            image_data = load_image(incident['image_url'])
             if image_data:
                 st.image(image_data, caption="Captured Image", use_container_width=True)
             else:

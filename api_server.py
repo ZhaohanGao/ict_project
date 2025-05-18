@@ -5,28 +5,14 @@ import csv
 import os
 from flask import Flask, request, jsonify, send_file
 from gtts import gTTS
-from detector import load_model, detect_vehicles, estimate_speed_by_length
+from yolo_tracker import YOLOByteTrackWrapper, estimate_speed_by_length
 from license import extract_vehicle_features
 import random
-from torchvision.models.detection import fasterrcnn_resnet50_fpn, FasterRCNN_ResNet50_FPN_Weights
-import torch
-
-def load_model():
-    weights = FasterRCNN_ResNet50_FPN_Weights.DEFAULT
-    model = fasterrcnn_resnet50_fpn(weights=weights)
-    model.eval()
-    if torch.cuda.is_available():
-        model = model.to("cuda")
-        print("✅ Using GPU.")
-    else:
-        print("⚠️ Using CPU. GPU not available.")
-    return model
 
 app = Flask(__name__, static_folder=".", static_url_path="/")
-model = load_model()
-
+tracker = YOLOByteTrackWrapper()
+print(f"[DEBUG] Loaded model type: {type(tracker.model)}")
 SPEED_LIMIT = 60.0  # km/h
-
 
 def generate_bd_license_plate():
     city = "DHAKA"
@@ -73,7 +59,6 @@ def violation_detect():
     snapshot_dir = os.path.join("uploads", "snapshots")
     os.makedirs(snapshot_dir, exist_ok=True)
 
-    trackers = {}
     track_data = {}
     frame_id = 0
 
@@ -83,59 +68,37 @@ def violation_detect():
             break
         frame_id += 1
 
-        if frame_id % 50 == 1:
-            detections = detect_vehicles(frame, model)
-            for det in detections:
-                tracker = cv2.TrackerCSRT_create()
-                x, y, w, h = det['bbox']
-                h_frame, w_frame = frame.shape[:2]
-                if x < 0 or y < 0 or w <= 0 or h <= 0:
-                    continue
-                if x + w > w_frame or y + h > h_frame:
-                    continue
+        tracked_vehicles = tracker.detect_and_track(frame)
+        for vehicle in tracked_vehicles:
+            x, y, w, h = vehicle["bbox"]
+            track_id = vehicle["id"]
+            class_name = vehicle["class_name"]
 
-                tracker.init(frame, (x, y, w, h))
-                car_id = str(uuid.uuid4())[:8]
-                trackers[car_id] = tracker
-                track_data[car_id] = {
-                    "positions": [(frame_id, (x + w//2, y + h))],
-                    "bboxes": [(x, y, w, h)],
-                    "class": det['class_name'],
-                    "features": extract_vehicle_features(frame, det['bbox'], det['class_name']),
+            if track_id not in track_data:
+                track_data[track_id] = {
+                    "positions": [], "bboxes": [], "class": class_name,
+                    "features": extract_vehicle_features(frame, (x, y, w, h), class_name),
                     "snapshot_frame": None
                 }
 
-        delete_ids = []
-        for car_id, tracker in trackers.items():
-            success, box = tracker.update(frame)
-            if not success:
-                delete_ids.append(car_id)
-                continue
-
-            x, y, w, h = map(int, box)
-            cx, cy = x + w//2, y + h
-            track_data[car_id]["positions"].append((frame_id, (cx, cy)))
-            track_data[car_id]["bboxes"].append((x, y, w, h))
-            track_data[car_id]["bbox"] = (x, y, w, h)
-            track_data[car_id]["snapshot_frame"] = frame.copy()
-            track_data[car_id]["speed"] = estimate_speed_by_length(
-                track_data[car_id]["positions"],
-                track_data[car_id]["bboxes"],
+            cx, cy = x + w // 2, y + h
+            track_data[track_id]["positions"].append((frame_id, (cx, cy)))
+            track_data[track_id]["bboxes"].append((x, y, w, h))
+            track_data[track_id]["bbox"] = (x, y, w, h)
+            track_data[track_id]["snapshot_frame"] = frame.copy()
+            track_data[track_id]["speed"] = estimate_speed_by_length(
+                track_data[track_id]["positions"],
+                track_data[track_id]["bboxes"],
                 fps,
-                track_data[car_id]["class"]
+                class_name
             )
 
-        for cid, info in track_data.items():
-            if "bbox" in info:
-                x, y, w, h = info["bbox"]
-                color = (0, 255, 0) if info.get("speed", 0.0) <= SPEED_LIMIT else (0, 0, 255)
-                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-                label = f"{info['features']['type']} {info.get('speed', 0.0):.1f} km/h"
-                cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-        out_writer.write(frame)
+            color = (0, 255, 0) if track_data[track_id]['speed'] <= SPEED_LIMIT else (0, 0, 255)
+            label = f"{class_name} {track_data[track_id]['speed']:.1f} km/h ID:{track_id}"
+            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+            cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
-        for car_id in delete_ids:
-            trackers.pop(car_id)
+        out_writer.write(frame)
 
     cap.release()
     out_writer.release()
@@ -206,56 +169,6 @@ def violation_detect():
         "overspeed_vehicles": overspeed_vehicles,
         "speed_limit": SPEED_LIMIT
     })
-
-
-@app.route("/vehicles", methods=["GET"])
-def get_all_vehicles():
-    database_path = os.path.join("uploads", "database.csv")
-    if not os.path.isfile(database_path):
-        return jsonify({"vehicles": []})
-    
-    with open(database_path, newline='', encoding='utf-8') as csvfile:
-        reader = csv.DictReader(csvfile)
-        vehicles = list(reader)
-    return jsonify({"vehicles": vehicles})
-
-
-@app.route("/violations", methods=["GET"])
-def get_overspeed_vehicles():
-    database_path = os.path.join("uploads", "database.csv")
-    if not os.path.isfile(database_path):
-        return jsonify({"overspeed_vehicles": []})
-
-    overspeed_vehicles = []
-    with open(database_path, newline='', encoding='utf-8') as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            try:
-                if float(row["speed_kmh"]) > SPEED_LIMIT:
-                    overspeed_vehicles.append(row)
-            except:
-                continue
-
-    return jsonify({"speed_limit": SPEED_LIMIT, "overspeed_vehicles": overspeed_vehicles})
-
-
-@app.route("/set_speed_limit", methods=["POST"])
-def set_speed_limit():
-    global SPEED_LIMIT
-    data = request.get_json()
-    if not data or "value" not in data:
-        return jsonify({"error": "Missing 'value' in JSON payload"}), 400
-    try:
-        SPEED_LIMIT = float(data["value"])
-        return jsonify({"message": "Speed limit updated", "speed_limit": SPEED_LIMIT})
-    except ValueError:
-        return jsonify({"error": "Invalid speed limit value"}), 400
-    
-
-@app.route("/get_speed_limit", methods=["GET"])
-def get_speed_limit():
-    return jsonify({"speed_limit": SPEED_LIMIT})
-
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
